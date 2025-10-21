@@ -9,26 +9,24 @@ import kotlin.math.sqrt
 private const val TAG = "MotionCtrl"
 
 /**
- * Motion detection state machine with hysteresis.
+ * Motion detection state machine with hysteresis and spike filtering.
  *
  * Algorithm:
- * 1. Low-pass filter (α=0.8) for gravity estimation
- * 2. Linear acceleration = raw - gravity
- * 3. Magnitude = sqrt(x² + y² + z²)
- * 4. RMS calculation over 2s window
- * 5. Spike rejection: ignore sudden RMS jumps (phone pickup)
- * 6. Hysteresis:
- *    - STILL → MOVING: accel > 0.4 for 3 seconds
- *    - MOVING → STILL: accel < 0.3 for 1.5 seconds
+ * 1. Low-pass filter (α=0.8) to estimate gravity
+ * 2. High-pass filter: linear acceleration = raw - gravity
+ * 3. Horizontal magnitude = sqrt(x² + y²)
+ * 4. RMS calculation over ~2s rolling window
+ * 5. Exponential smoothing of RMS signal
+ * 6. Spike rejection: ignore sudden jumps (phone pickup detection)
+ * 7. Hysteresis state machine:
+ *    - STILL → MOVING: acceleration > threshold for configured delay
+ *    - MOVING → STILL: acceleration < threshold for configured delay
  *
- * Why TYPE_ACCELEROMETER not LINEAR_ACCELERATION?
- * Xiaomi bug: LINEAR_ACCELERATION doesn't work reliably on MIUI.
+ * The hysteresis delays prevent false triggers from brief movements like
+ * picking up the phone, bumps, or accidental taps.
  *
- * Why 3s/1.5s delays?
- * Prevents false triggers from brief movements (picking up phone, bumps).
- *
- * Singleton: Single source of truth for motion state across app.
- * Trade-off: Harder to test, but simple for single-user app.
+ * Singleton pattern: provides single source of truth for motion state.
+ * Call init() with MotionConfig and Logger before first use.
  */
 object MotionController {
     private lateinit var config: MotionConfig
@@ -53,7 +51,7 @@ object MotionController {
     // Sampling frequency measurement
     private var lastSampleTime = 0L
     private var sampleCount = 0
-    private var rmsWindowSize = 26 // default, majd frissül a frekvencia alapján
+    private var rmsWindowSize = 26
 
     // RMS calculation
     private val accelWindow = ArrayDeque<Float>()
@@ -78,7 +76,7 @@ object MotionController {
      * Called by AccelerometerManager on each sensor event.
      */
     fun onAcceleration(x: Float, y: Float, z: Float, timestamp: Long) {
-        // ---------------------- Mintavételi frekvencia mérés ----------------------
+        // ---------------------- Sampling frequency measurement ----------------------
         if (lastSampleTime == 0L) lastSampleTime = timestamp
         sampleCount++
         val freqDt = timestamp - lastSampleTime
@@ -95,7 +93,7 @@ object MotionController {
 
         //logger.count(TAG, "accel_updates", logEvery = 10)
 
-        // ---------------------- Gyorsulás feldolgozás ----------------------
+        // ---------------------- Acceleration processing ----------------------
         // 1. Low-pass filter: estimate gravity
         gravityX = config.filterAlpha * gravityX + (1 - config.filterAlpha) * x
         gravityY = config.filterAlpha * gravityY + (1 - config.filterAlpha) * y
@@ -113,7 +111,7 @@ object MotionController {
                 (1 - config.accelSmoothingAlpha) * smoothedAccel
         val filteredAccel = smoothedAccel
 
-        // ---------------------- RMS számítás ----------------------
+        // ---------------------- RMS calculation ----------------------
         // 4b. RMS calculation over rolling window
         accelWindow.add(rawHorizAccel)
         if (accelWindow.size > rmsWindowSize) accelWindow.removeFirst()
@@ -123,20 +121,20 @@ object MotionController {
             val meanSquare = accelWindow.sumOf { (it * it).toDouble() } / accelWindow.size
             sqrt(meanSquare).toFloat()
         } else {
-            smoothedAccel // fallback az ablak feltöltődéséig
+            smoothedAccel // fallback until window fills
         }
 
-        // Exponenciális csillapítás
+        // Exponential smoothing
         rmsSmoothed = config.rmsAlpha * rmsAccel + (1 - config.rmsAlpha) * rmsSmoothed
 
-        val isSpike = rmsSmoothed > config.spikeThreshold  // pickup: 1.5-2.7, gyaloglás: 0.4-1.2
+        val isSpike = rmsSmoothed > config.spikeThreshold
 
         if (isSpike) {
             logger.d(TAG, "SPIKE REJECTED: rms=${rmsSmoothed.f2()} > 0.8")
         }
 
         val usedAccel = if (isSpike) {
-            config.motionStartThreshold  // vagy 0.3f - stabil "nyugalmi" érték
+            config.motionStartThreshold
         } else {
             rmsSmoothed
         }
@@ -199,6 +197,5 @@ object MotionController {
         rmsSmoothed = 0f
     }
 
-    // ========== HELPER FÜGGVÉNYEK ==========
     private fun Float.f2() = "%.2f".format(this)
 }

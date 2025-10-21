@@ -3,12 +3,13 @@ package io.github.nrob.motiondetector
 /**
  * Motion detection configuration parameters.
  *
- * This data class is the single source of truth for all motion detection
- * behavior. All parameters are exposed to allow testing and optimization
- * via grid search or other validation methods.
+ * Single source of truth for motion detection behavior. All parameters
+ * are exposed to enable testing, tuning, and grid search optimization.
  *
- * Passed to MotionController at initialization, making it fully decoupled
- * from any specific AppConfig implementation.
+ * Default values are optimized for typical walking/driving scenarios.
+ * Use factory methods for common presets:
+ * - MotionConfig.default() - balanced settings
+ * - MotionConfig.optimized() - tuned via grid search on real-world data
  */
 data class MotionConfig(
     /**

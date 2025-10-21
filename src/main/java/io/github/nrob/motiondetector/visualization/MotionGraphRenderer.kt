@@ -4,8 +4,15 @@ import io.github.nrob.motiondetector.MotionState
 import kotlin.math.max
 
 /**
- * Platformfüggetlen “renderer” logika.
- * Az Android/iOS/Desktop adapterek csak a tényleges rajzolást végzik.
+ * Single frame of motion data for visualization.
+ *
+ * Contains acceleration values at different processing stages for graphing:
+ * - raw: horizontal acceleration magnitude (m/s²)
+ * - filtered: exponentially smoothed acceleration
+ * - rms: RMS acceleration over 2-second window
+ * - used: final value after spike rejection
+ *
+ * Platform-independent: rendering adapters handle the actual drawing.
  */
 data class MotionFrame(
     val raw: Float,
